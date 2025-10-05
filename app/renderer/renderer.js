@@ -75,6 +75,8 @@ class CameraListerApp {
       
       if (result.success) {
         this.cameras = result.cameras || [];
+        // Merge with mediaDevices (browser API) to catch cameras visible to OS but not libusb
+        await this.mergeWithMediaDevices();
         this.updateLastUpdated();
         
         if (this.cameras.length === 0) {
@@ -94,6 +96,74 @@ class CameraListerApp {
       this.showToast('error', 'Failed to load cameras');
     } finally {
       this.isLoading = false;
+    }
+  }
+
+  async mergeWithMediaDevices() {
+    try {
+      // Ensure labels are available
+      await this.ensureCameraPermission();
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoInputs = devices.filter(d => d.kind === 'videoinput');
+      const existingNames = new Set(
+        (this.cameras || []).map(c => (c.name || '').toLowerCase())
+      );
+      const existingIdPairs = new Set(
+        (this.cameras || [])
+          .filter(c => typeof c.vendor === 'number' && typeof c.product === 'number' && c.vendor !== 0 && c.product !== 0)
+          .map(c => `${c.vendor.toString(16)}:${c.product.toString(16)}`)
+      );
+      for (const v of videoInputs) {
+        const label = (v.label || 'Unknown Camera').trim();
+        const key = label.toLowerCase();
+        const parsed = this.extractVendorProductFromLabel(label);
+
+        // Skip if name already exists
+        if (existingNames.has(key)) {
+          continue;
+        }
+
+        // Skip if vendor:product matches an existing UVC device
+        if (parsed && existingIdPairs.has(parsed.pairKey)) {
+          continue;
+        }
+
+        const vendor = parsed ? parsed.vendor : 0;
+        const product = parsed ? parsed.product : 0;
+        this.cameras.push({
+          name: label,
+          vendor,
+          product,
+          address: 0,
+          vendorHex: `0x${vendor.toString(16).padStart(4, '0')}`,
+          productHex: `0x${product.toString(16).padStart(4, '0')}`,
+        });
+        existingNames.add(key);
+        if (parsed) existingIdPairs.add(parsed.pairKey);
+      }
+    } catch (err) {
+      // Best-effort only; ignore errors
+      console.warn('mediaDevices merge failed:', err);
+    }
+  }
+
+  extractVendorProductFromLabel(label) {
+    // Try to find patterns like "(1908:2311)", "[1908:2311]", or "1908:2311"
+    const m = label.match(/(?:\(|\[|\b)([0-9a-fA-F]{3,4})\s*[:x]\s*([0-9a-fA-F]{3,4})(?:\)|\]|\b)/);
+    if (!m) return null;
+    const v = parseInt(m[1], 16);
+    const p = parseInt(m[2], 16);
+    if (Number.isNaN(v) || Number.isNaN(p)) return null;
+    return { vendor: v, product: p, pairKey: `${v.toString(16)}:${p.toString(16)}` };
+  }
+
+  async ensureCameraPermission() {
+    try {
+      // Request minimal access to reveal device labels, then stop immediately
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      stream.getTracks().forEach(t => t.stop());
+    } catch (_) {
+      // Ignore; labels might remain hidden
     }
   }
 

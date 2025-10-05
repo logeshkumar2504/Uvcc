@@ -6,6 +6,7 @@ A modern desktop application to list connected UVC cameras
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
+const { pathToFileURL } = require('url');
 
 // Keep a global reference of the window object
 let mainWindow;
@@ -78,61 +79,62 @@ app.on('window-all-closed', () => {
 // IPC handlers for camera listing
 ipcMain.handle('list-cameras', async () => {
   try {
-    // Use the compiled TypeScript wrapper
-    return new Promise((resolve, reject) => {
-      const wrapperPath = path.join(__dirname, '../dist/camera-lister-wrapper.js');
-      const child = spawn('node', [wrapperPath], {
-        cwd: path.join(__dirname, '..'),
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-
-      let output = '';
-      let errorOutput = '';
-
-      child.stdout.on('data', (data) => {
-        output += data.toString();
-      });
-
-      child.stderr.on('data', (data) => {
-        errorOutput += data.toString();
-      });
-
-      child.on('close', (code) => {
-        if (code === 0) {
-          try {
-            // Parse the JSON output from the wrapper
-            const cameras = output.trim() ? JSON.parse(output.trim()) : [];
-            resolve({
-              success: true,
-              cameras: cameras,
-              count: cameras.length
-            });
-          } catch (parseError) {
-            // If no JSON output, try to parse as formatted text
-            if (output.includes('No UVC-compatible cameras found')) {
-              resolve({
-                success: true,
-                cameras: [],
-                count: 0
-              });
-            } else {
-              reject(new Error('Failed to parse camera data: ' + parseError.message));
-            }
-          }
-        } else {
-          reject(new Error('Camera listing failed: ' + errorOutput));
-        }
-      });
-
-      child.on('error', (error) => {
-        reject(new Error('Failed to execute camera listing: ' + error.message));
-      });
-    });
-  } catch (error) {
+    // Prefer importing the wrapper directly to get structured data
+    const wrapperModulePath = path.join(__dirname, '../dist/camera-lister-wrapper.js');
+    const moduleUrl = pathToFileURL(wrapperModulePath).href;
+    const { listConnectedCameras } = await import(moduleUrl);
+    const cameras = await listConnectedCameras();
     return {
-      success: false,
-      error: error.message
+      success: true,
+      cameras,
+      count: cameras.length,
     };
+  } catch (esmError) {
+    // Fallback: spawn as a subprocess and try to parse output gracefully
+    try {
+      return await new Promise((resolve, reject) => {
+        const wrapperPath = path.join(__dirname, '../dist/camera-lister-wrapper.js');
+        const child = spawn(process.execPath, [wrapperPath, '--json'], {
+          cwd: path.join(__dirname, '..'),
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+
+        let output = '';
+        let errorOutput = '';
+
+        child.stdout.on('data', (data) => {
+          output += data.toString();
+        });
+
+        child.stderr.on('data', (data) => {
+          errorOutput += data.toString();
+        });
+
+        child.on('close', () => {
+          // Try JSON first
+          try {
+            const maybe = output.trim();
+            const cameras = maybe ? JSON.parse(maybe) : [];
+            resolve({ success: true, cameras, count: cameras.length });
+            return;
+          } catch {}
+
+          // If formatted text indicates none found
+          if (output.includes('No UVC-compatible cameras found')) {
+            resolve({ success: true, cameras: [], count: 0 });
+            return;
+          }
+
+          reject(new Error('Camera listing failed: ' + (errorOutput || output)));
+        });
+
+        child.on('error', (error) => {
+          reject(new Error('Failed to execute camera listing: ' + error.message));
+        });
+      });
+    } catch (spawnError) {
+      return { success: false, error: spawnError.message || esmError.message };
+    }
   }
 });
 
