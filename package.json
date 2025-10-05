@@ -1,0 +1,128 @@
+{
+  "name": "uvcc",
+  "version": "7.0.0",
+  "description": "USB Video Class (UVC) device configurator for the command line (CLI). Used for webcams, camcorders, etcetera.",
+  "homepage": "https://joelpurra.com/projects/uvcc/",
+  "type": "module",
+  "exports": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "main": "app/main.cjs",
+  "bin": {
+    "uvcc": "./dist/index.js"
+  },
+  "files": [
+    "dist/**/*"
+  ],
+  "scripts": {
+    "clean": "rimraf ./dist/",
+    "build": "tsc",
+    "rebuild": "npm run --silent clean && npm run --silent build",
+    "build:watch": "tsc --watch",
+    "debug:run": "node --inspect ./dist/index.js",
+    "debug:run:break": "node --inspect-brk ./dist/index.js",
+    "test": "npm run --silent lint",
+    "lint": "npm run --silent lint:xo && npm run --silent lint:prettier && npm run --silent lint:copyright",
+    "lint:fix": "npm run --silent lint:xo:fix && npm run --silent lint:prettier:fix",
+    "lint:copyright": "find . -not \\( -path './.git/*' -or -path './node_modules/*' -or -path './dist/*' \\) -type f \\( -iname '*.js' -or -iname '*.ts' \\) -print0 | xargs -0 grep -L 'This file is part of uvcc' | sed 's/^/File is missing copyright notice: /'",
+    "lint:prettier": "prettier --list-different \"**/*.json\" \"**/*.md\" || { echo \"Prettier needs to format the above files. Try 'npm run --silent lint:fix'.\" && exit 1; }",
+    "lint:prettier:fix": "prettier --write \"**/*.json\" \"**/*.md\"",
+    "lint:xo": "xo",
+    "lint:xo:fix": "xo --fix",
+    "prepublishOnly": "git diff-index --exit-code master && npm run --silent rebuild && npm run --silent test",
+    "electron": "electron .",
+    "electron:dev": "NODE_ENV=development electron .",
+    "electron:build": "npm run build && electron-builder",
+    "electron:dist": "npm run build && electron-builder --publish=never",
+    "app": "npm run build && electron app/main.cjs"
+  },
+  "dependencies": {
+    "array-non-uniq": "^1.0.0",
+    "bluebird": "^3.7.2",
+    "chalk": "^5.2.0",
+    "engine-check": "^1.0.1",
+    "filter-obj": "^3.0.0",
+    "find-up": "^6.3.0",
+    "map-obj": "^5.0.2",
+    "read-pkg-up": "^9.1.0",
+    "sort-keys": "^5.0.0",
+    "stream-to-promise": "^3.0.0",
+    "uvc-control": "github:joelpurra/node-uvc-control#v2",
+    "yargs": "^17.7.1"
+  },
+  "devDependencies": {
+    "@sindresorhus/tsconfig": "^2.0.0",
+    "@types/bluebird": "^3.5.38",
+    "@types/engine-check": "^1.1.1",
+    "@types/stream-to-promise": "^2.2.1",
+    "@types/yargs": "^17.0.22",
+    "electron": "^38.2.1",
+    "electron-builder": "^26.0.12",
+    "eslint-config-joelpurra": "github:joelpurra/eslint-config-joelpurra#semver:^v11.0.1",
+    "husky": "^4.3.8",
+    "rimraf": "^3.0.2",
+    "type-fest": "^2.19.0",
+    "typescript": "^4.9.5",
+    "usb": "^2.8.0",
+    "xo": "^0.48.0"
+  },
+  "engines": {
+    "node": "^16.0.0 || ^18.0.0 || ^19.0.0 || ^20.0.0"
+  },
+  "keywords": [
+    "usb",
+    "usb video class",
+    "uvc",
+    "camera",
+    "webcam",
+    "webcamera",
+    "controls",
+    "configuration",
+    "libusb",
+    "libuvc",
+    "uvc-control"
+  ],
+  "bugs": {
+    "url": "https://github.com/joelpurra/uvcc/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joelpurra/uvcc.git"
+  },
+  "author": {
+    "name": "Joel Purra",
+    "email": "mig@joelpurra.se",
+    "url": "https://joelpurra.com/"
+  },
+  "license": "GPL-3.0",
+  "husky": {
+    "hooks": {
+      "pre-commit": "npm run --silent test",
+      "pre-push": "npm run --silent test"
+    }
+  },
+  "build": {
+    "appId": "com.uvcc.camera-lister",
+    "productName": "Camera Lister",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "app/**/*",
+      "dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities",
+      "icon": "app/assets/icon.icns"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "app/assets/icon.ico"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "app/assets/icon.png"
+    }
+  }
+}

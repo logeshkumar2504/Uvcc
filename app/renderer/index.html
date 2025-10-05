@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Lister</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-content">
+                <div class="header-left">
+                    <i class="fas fa-video header-icon"></i>
+                    <h1 class="app-title">Camera Lister</h1>
+                    <span class="app-subtitle">UVC Camera Discovery Tool</span>
+                </div>
+                <div class="header-right">
+                    <button id="refreshBtn" class="btn btn-primary">
+                        <i class="fas fa-sync-alt"></i>
+                        <span>Refresh</span>
+                    </button>
+                    <button id="infoBtn" class="btn btn-secondary">
+                        <i class="fas fa-info-circle"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Loading State -->
+            <div id="loadingState" class="loading-container">
+                <div class="loading-spinner"></div>
+                <p class="loading-text">Discovering cameras...</p>
+            </div>
+
+            <!-- Error State -->
+            <div id="errorState" class="error-container hidden">
+                <div class="error-icon">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h3 class="error-title">Unable to Access Cameras</h3>
+                <p id="errorMessage" class="error-message"></p>
+                <button id="retryBtn" class="btn btn-primary">Try Again</button>
+            </div>
+
+            <!-- Empty State -->
+            <div id="emptyState" class="empty-container hidden">
+                <div class="empty-icon">
+                    <i class="fas fa-video-slash"></i>
+                </div>
+                <h3 class="empty-title">No Cameras Found</h3>
+                <p class="empty-message">No UVC-compatible cameras were detected on your system.</p>
+                <div class="empty-tips">
+                    <h4>Tips:</h4>
+                    <ul>
+                        <li>Make sure your camera is connected via USB</li>
+                        <li>Verify your camera supports USB Video Class (UVC)</li>
+                        <li>Check if other applications can see the camera</li>
+                        <li>Try running with elevated permissions if needed</li>
+                    </ul>
+                </div>
+                <button id="emptyRetryBtn" class="btn btn-primary">Refresh</button>
+            </div>
+
+            <!-- Camera List -->
+            <div id="cameraList" class="camera-list-container hidden">
+                <div class="camera-list-header">
+                    <h2 id="cameraCount" class="camera-count">Cameras Found</h2>
+                    <div class="camera-list-actions">
+                        <button id="exportBtn" class="btn btn-secondary">
+                            <i class="fas fa-download"></i>
+                            <span>Export</span>
+                        </button>
+                        <button id="copyBtn" class="btn btn-secondary">
+                            <i class="fas fa-copy"></i>
+                            <span>Copy Info</span>
+                        </button>
+                    </div>
+                </div>
+                <div id="cameraGrid" class="camera-grid">
+                    <!-- Camera cards will be inserted here -->
+                </div>
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <div class="footer-content">
+                <div class="footer-left">
+                    <span class="footer-text">Built with Electron & uvcc</span>
+                </div>
+                <div class="footer-right">
+                    <span id="lastUpdated" class="last-updated"></span>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Info Modal -->
+    <div id="infoModal" class="modal hidden">
+        <div class="modal-overlay"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">About Camera Lister</h3>
+                <button id="closeModalBtn" class="modal-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="info-section">
+                    <h4>What is Camera Lister?</h4>
+                    <p>Camera Lister is a desktop application that helps you discover and list all UVC (USB Video Class) compatible cameras connected to your system.</p>
+                </div>
+                <div class="info-section">
+                    <h4>Supported Cameras</h4>
+                    <ul class="supported-cameras">
+                        <li>Logitech C920/C922 HD Pro Webcam</li>
+                        <li>Elgato Facecam</li>
+                        <li>Microsoft LifeCam Studio</li>
+                        <li>Any UVC-compatible camera</li>
+                    </ul>
+                </div>
+                <div class="info-section">
+                    <h4>App Information</h4>
+                    <div id="appInfo" class="app-info-grid">
+                        <!-- App info will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="toast hidden">
+        <div class="toast-content">
+            <i id="toastIcon" class="toast-icon"></i>
+            <span id="toastMessage" class="toast-message"></span>
+        </div>
+    </div>
+
+    <script src="renderer.js"></script>
+</body>
+</html>

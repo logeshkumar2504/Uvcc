@@ -1,0 +1,8 @@
+Camera Lister Icon Placeholder
+This is a placeholder for the app icon.
+In a real application, you would provide:
+- icon.png (256x256) for Linux
+- icon.ico (multiple sizes) for Windows  
+- icon.icns (multiple sizes) for macOS
+
+For now, the app will use the default Electron icon.
