@@ -7,6 +7,11 @@ class CameraListerApp {
   constructor() {
     this.cameras = [];
     this.isLoading = false;
+    this.currentStream = null;
+    this.fpsRafId = null;
+    this.fpsLastTime = 0;
+    this.fpsFrames = 0;
+    this.measuredFps = 0;
     this.init();
   }
 
@@ -16,48 +21,11 @@ class CameraListerApp {
   }
 
   setupEventListeners() {
-    // Refresh button
-    document.getElementById('refreshBtn').addEventListener('click', () => {
-      this.loadCameras();
-    });
-
-    // Info button
-    document.getElementById('infoBtn').addEventListener('click', () => {
-      this.showInfoModal();
-    });
-
-    // Retry buttons
-    document.getElementById('retryBtn').addEventListener('click', () => {
-      this.loadCameras();
-    });
-
-    document.getElementById('emptyRetryBtn').addEventListener('click', () => {
-      this.loadCameras();
-    });
-
-    // Modal controls
-    document.getElementById('closeModalBtn').addEventListener('click', () => {
-      this.hideInfoModal();
-    });
-
-    document.querySelector('.modal-overlay').addEventListener('click', () => {
-      this.hideInfoModal();
-    });
-
-    // Export and copy buttons
-    document.getElementById('exportBtn').addEventListener('click', () => {
-      this.exportCameraData();
-    });
-
-    document.getElementById('copyBtn').addEventListener('click', () => {
-      this.copyCameraData();
-    });
+    // No in-page buttons remain
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        this.hideInfoModal();
-      } else if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
+      if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
         e.preventDefault();
         this.loadCameras();
       }
@@ -67,8 +35,13 @@ class CameraListerApp {
     if (window.electronAPI && window.electronAPI.onMenuRefresh) {
       window.electronAPI.onMenuRefresh(() => this.loadCameras());
     }
-    if (window.electronAPI && window.electronAPI.onMenuShowInfo) {
-      window.electronAPI.onMenuShowInfo(() => this.showInfoModal());
+    // Menu About removed
+    if (window.electronAPI && window.electronAPI.onMenuSelectCamera) {
+      window.electronAPI.onMenuSelectCamera((camera) => {
+        this.startStreamForCamera(camera).catch((err) => {
+          console.error('Failed to start stream:', err);
+        });
+      });
     }
   }
 
@@ -76,7 +49,7 @@ class CameraListerApp {
     if (this.isLoading) return;
 
     this.isLoading = true;
-    this.showLoadingState();
+    // headless: no loading state
 
     try {
       const result = await window.electronAPI.listCameras();
@@ -85,23 +58,17 @@ class CameraListerApp {
         this.cameras = result.cameras || [];
         // Merge with mediaDevices (browser API) to catch cameras visible to OS but not libusb
         await this.mergeWithMediaDevices();
-        this.updateLastUpdated();
-        
-        if (this.cameras.length === 0) {
-          this.showEmptyState();
-        } else {
-          this.showCameraList();
-          this.renderCameras();
+        // Notify main to update native Devices menu with merged list
+        if (window.electronAPI && window.electronAPI.updateCameras) {
+          window.electronAPI.updateCameras(this.cameras);
         }
-        
-        this.showToast('success', 'Cameras refreshed successfully');
+        // headless: no DOM updates
       } else {
         throw new Error(result.error || 'Failed to load cameras');
       }
     } catch (error) {
       console.error('Error loading cameras:', error);
-      this.showErrorState(error.message);
-      this.showToast('error', 'Failed to load cameras');
+      // headless: no error UI
     } finally {
       this.isLoading = false;
     }
@@ -113,9 +80,6 @@ class CameraListerApp {
       await this.ensureCameraPermission();
       const devices = await navigator.mediaDevices.enumerateDevices();
       const videoInputs = devices.filter(d => d.kind === 'videoinput');
-      const existingNames = new Set(
-        (this.cameras || []).map(c => (c.name || '').toLowerCase())
-      );
       const existingIdPairs = new Set(
         (this.cameras || [])
           .filter(c => typeof c.vendor === 'number' && typeof c.product === 'number' && c.vendor !== 0 && c.product !== 0)
@@ -123,13 +87,7 @@ class CameraListerApp {
       );
       for (const v of videoInputs) {
         const label = (v.label || 'Unknown Camera').trim();
-        const key = label.toLowerCase();
         const parsed = this.extractVendorProductFromLabel(label);
-
-        // Skip if name already exists
-        if (existingNames.has(key)) {
-          continue;
-        }
 
         // Skip if vendor:product matches an existing UVC device
         if (parsed && existingIdPairs.has(parsed.pairKey)) {
@@ -145,14 +103,140 @@ class CameraListerApp {
           address: 0,
           vendorHex: `0x${vendor.toString(16).padStart(4, '0')}`,
           productHex: `0x${product.toString(16).padStart(4, '0')}`,
+          deviceId: v.deviceId || '',
+          groupId: v.groupId || ''
         });
-        existingNames.add(key);
         if (parsed) existingIdPairs.add(parsed.pairKey);
       }
     } catch (err) {
       // Best-effort only; ignore errors
       console.warn('mediaDevices merge failed:', err);
     }
+  }
+
+  async startStreamForCamera(camera) {
+    try {
+      // Stop previous stream
+      if (this.currentStream) {
+        try { this.currentStream.getTracks().forEach(t => t.stop()); } catch {}
+        this.currentStream = null;
+      }
+
+      // Resolve deviceId
+      let targetDeviceId = camera && camera.deviceId ? camera.deviceId : '';
+      if (!targetDeviceId) {
+        try {
+          await this.ensureCameraPermission();
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoInputs = devices.filter(d => d.kind === 'videoinput');
+          const name = (camera && camera.name ? String(camera.name) : '').toLowerCase();
+          const match = videoInputs.find(v => (v.label || '').toLowerCase().includes(name));
+          if (match) targetDeviceId = match.deviceId;
+        } catch {}
+      }
+
+      const constraints = targetDeviceId
+        ? { video: { deviceId: { exact: targetDeviceId } }, audio: false }
+        : { video: true, audio: false };
+
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.currentStream = stream;
+      this.renderVideo(stream);
+    } catch (err) {
+      // Try fallback without exact constraint
+      if (targetDeviceId) {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        this.currentStream = stream;
+        this.renderVideo(stream);
+        return;
+      }
+      throw err;
+    }
+  }
+
+  renderVideo(stream) {
+    // Ensure body fills the window and is dark
+    document.documentElement.style.height = '100%';
+    document.body.style.height = '100%';
+    document.body.style.margin = '0';
+    document.body.style.backgroundColor = '#0b0f1a';
+    document.body.style.overflow = 'hidden';
+
+    let video = document.getElementById('cameraVideo');
+    if (!video) {
+      video = document.createElement('video');
+      video.id = 'cameraVideo';
+      video.autoplay = true;
+      video.playsInline = true;
+      video.muted = true; // avoid feedback on devices exposing audio
+      video.style.position = 'fixed';
+      video.style.top = '0';
+      video.style.left = '0';
+      video.style.width = '100vw';
+      video.style.height = '100vh';
+      video.style.objectFit = 'cover';
+      video.style.backgroundColor = '#000';
+      video.style.outline = 'none';
+      document.body.innerHTML = '';
+      document.body.appendChild(video);
+      // Create bottom info bar
+      const bar = document.createElement('div');
+      bar.id = 'bottomInfoBar';
+      bar.style.position = 'fixed';
+      bar.style.left = '0';
+      bar.style.right = '0';
+      bar.style.bottom = '0';
+      bar.style.height = '40px';
+      bar.style.display = 'flex';
+      bar.style.alignItems = 'center';
+      bar.style.padding = '0 12px';
+      bar.style.background = 'linear-gradient(180deg, rgba(0,0,0,0.0), rgba(0,0,0,0.55))';
+      bar.style.color = '#e5e7eb';
+      bar.style.fontFamily = "Inter, -apple-system, 'Segoe UI', Roboto, sans-serif";
+      bar.style.fontSize = '12px';
+      bar.style.userSelect = 'none';
+      const text = document.createElement('span');
+      text.id = 'bottomInfoText';
+      bar.appendChild(text);
+      document.body.appendChild(bar);
+    }
+    video.srcObject = stream;
+    // Update info bar and FPS monitoring
+    this.updateBottomBar();
+    this.startFpsMonitor();
+  }
+
+  updateBottomBar() {
+    const video = document.getElementById('cameraVideo');
+    const text = document.getElementById('bottomInfoText');
+    if (!video || !text) return;
+    const track = this.currentStream ? this.currentStream.getVideoTracks()[0] : null;
+    const settings = track && track.getSettings ? track.getSettings() : {};
+    const width = video.videoWidth || settings.width || 0;
+    const height = video.videoHeight || settings.height || 0;
+    const fps = this.measuredFps || settings.frameRate || 0;
+    const formattedFps = fps ? `${Math.round(fps)} fps` : '';
+    const resolution = width && height ? `${width}×${height}` : 'Unknown';
+    text.textContent = `${resolution}${formattedFps ? ' @ ' + formattedFps : ''}`;
+  }
+
+  startFpsMonitor() {
+    if (this.fpsRafId) cancelAnimationFrame(this.fpsRafId);
+    this.fpsLastTime = performance.now();
+    this.fpsFrames = 0;
+
+    const step = (now) => {
+      this.fpsFrames += 1;
+      const dt = now - this.fpsLastTime;
+      if (dt >= 1000) {
+        this.measuredFps = (this.fpsFrames * 1000) / dt;
+        this.fpsFrames = 0;
+        this.fpsLastTime = now;
+        this.updateBottomBar();
+      }
+      this.fpsRafId = requestAnimationFrame(step);
+    };
+    this.fpsRafId = requestAnimationFrame(step);
   }
 
   extractVendorProductFromLabel(label) {
@@ -175,56 +259,7 @@ class CameraListerApp {
     }
   }
 
-  showLoadingState() {
-    this.hideAllStates();
-    document.getElementById('loadingState').classList.remove('hidden');
-    document.getElementById('loadingState').classList.add('fade-in');
-  }
-
-  showErrorState(message) {
-    this.hideAllStates();
-    document.getElementById('errorMessage').textContent = message;
-    document.getElementById('errorState').classList.remove('hidden');
-    document.getElementById('errorState').classList.add('fade-in');
-  }
-
-  showEmptyState() {
-    this.hideAllStates();
-    document.getElementById('emptyState').classList.remove('hidden');
-    document.getElementById('emptyState').classList.add('fade-in');
-  }
-
-  showCameraList() {
-    this.hideAllStates();
-    document.getElementById('cameraList').classList.remove('hidden');
-    document.getElementById('cameraList').classList.add('fade-in');
-  }
-
-  hideAllStates() {
-    const states = ['loadingState', 'errorState', 'emptyState', 'cameraList'];
-    states.forEach(stateId => {
-      const element = document.getElementById(stateId);
-      element.classList.add('hidden');
-      element.classList.remove('fade-in');
-    });
-  }
-
-  renderCameras() {
-    const cameraGrid = document.getElementById('cameraGrid');
-    const cameraCount = document.getElementById('cameraCount');
-    
-    // Update count
-    cameraCount.textContent = `${this.cameras.length} Camera${this.cameras.length !== 1 ? 's' : ''} Found`;
-    
-    // Clear existing cameras
-    cameraGrid.innerHTML = '';
-    
-    // Render each camera
-    this.cameras.forEach((camera, index) => {
-      const cameraCard = this.createCameraCard(camera, index);
-      cameraGrid.appendChild(cameraCard);
-    });
-  }
+  // All UI rendering removed
 
   createCameraCard(camera, index) {
     const card = document.createElement('div');
@@ -272,122 +307,13 @@ class CameraListerApp {
     return card;
   }
 
-  async showInfoModal() {
-    try {
-      const appInfo = await window.electronAPI.getAppInfo();
-      this.populateAppInfo(appInfo);
-    } catch (error) {
-      console.error('Error loading app info:', error);
-    }
-    
-    document.getElementById('infoModal').classList.remove('hidden');
-    document.body.style.overflow = 'hidden';
-  }
+  // Info modal removed
 
-  hideInfoModal() {
-    document.getElementById('infoModal').classList.add('hidden');
-    document.body.style.overflow = '';
-  }
+  // Export/Copy functionality removed
 
-  populateAppInfo(appInfo) {
-    const appInfoGrid = document.getElementById('appInfo');
-    appInfoGrid.innerHTML = `
-      <div class="app-info-item">
-        <span class="app-info-label">Application</span>
-        <span class="app-info-value">${appInfo.name || 'Camera Lister'}</span>
-      </div>
-      <div class="app-info-item">
-        <span class="app-info-label">Version</span>
-        <span class="app-info-value">${appInfo.version || '1.0.0'}</span>
-      </div>
-      <div class="app-info-item">
-        <span class="app-info-label">Platform</span>
-        <span class="app-info-value">${appInfo.platform || 'Unknown'}</span>
-      </div>
-      <div class="app-info-item">
-        <span class="app-info-label">Architecture</span>
-        <span class="app-info-value">${appInfo.arch || 'Unknown'}</span>
-      </div>
-    `;
-  }
+  // Footer timestamp removed
 
-  exportCameraData() {
-    if (this.cameras.length === 0) {
-      this.showToast('warning', 'No cameras to export');
-      return;
-    }
-
-    const data = {
-      timestamp: new Date().toISOString(),
-      cameras: this.cameras,
-      count: this.cameras.length
-    };
-
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `cameras-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    
-    this.showToast('success', 'Camera data exported successfully');
-  }
-
-  async copyCameraData() {
-    if (this.cameras.length === 0) {
-      this.showToast('warning', 'No cameras to copy');
-      return;
-    }
-
-    const text = this.cameras.map((camera, index) => {
-      return `${index + 1}. ${camera.name}
-   Vendor: ${camera.vendorHex} (${camera.vendor})
-   Product: ${camera.productHex} (${camera.product})
-   Address: ${camera.address}`;
-    }).join('\n\n');
-
-    try {
-      await navigator.clipboard.writeText(text);
-      this.showToast('success', 'Camera data copied to clipboard');
-    } catch (error) {
-      console.error('Error copying to clipboard:', error);
-      this.showToast('error', 'Failed to copy to clipboard');
-    }
-  }
-
-  updateLastUpdated() {
-    const lastUpdated = document.getElementById('lastUpdated');
-    const now = new Date();
-    lastUpdated.textContent = `Last updated: ${now.toLocaleTimeString()}`;
-  }
-
-  showToast(type, message) {
-    const toast = document.getElementById('toast');
-    const toastIcon = document.getElementById('toastIcon');
-    const toastMessage = document.getElementById('toastMessage');
-    
-    // Set icon based on type
-    const icons = {
-      success: 'fas fa-check-circle',
-      error: 'fas fa-exclamation-circle',
-      warning: 'fas fa-exclamation-triangle'
-    };
-    
-    toastIcon.className = `toast-icon ${icons[type] || icons.info}`;
-    toastMessage.textContent = message;
-    
-    // Remove existing classes and add new one
-    toast.className = `toast ${type} fade-in`;
-    
-    // Auto-hide after 3 seconds
-    setTimeout(() => {
-      toast.classList.add('hidden');
-    }, 3000);
-  }
+  // Toasts removed
 
   escapeHtml(text) {
     const div = document.createElement('div');

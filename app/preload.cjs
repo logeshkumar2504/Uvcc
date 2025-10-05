@@ -13,7 +13,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   refreshCameras: () => ipcRenderer.invoke('refresh-cameras'),
   
   // App information
-  getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  // getAppInfo removed
   
   // Event listeners
   onCameraUpdate: (callback) => {
@@ -22,9 +22,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onMenuRefresh: (callback) => {
     ipcRenderer.on('menu-refresh', callback);
   },
-  onMenuShowInfo: (callback) => {
-    ipcRenderer.on('menu-show-info', callback);
+  // onMenuShowInfo removed
+  onMenuSelectCamera: (callback) => {
+    ipcRenderer.on('menu-select-camera', (_event, camera) => callback(camera));
   },
+  // Send merged camera list to main to rebuild native menu
+  updateCameras: (cameras) => ipcRenderer.send('update-cameras', cameras),
   
   // Remove listeners
   removeAllListeners: (channel) => {

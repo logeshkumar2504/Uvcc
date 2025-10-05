@@ -8,8 +8,9 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
 
-// Keep a global reference of the window object
+// Keep a global reference of the window object and camera cache
 let mainWindow;
+let currentCameras = [];
 
 function createWindow() {
   // Create the browser window
@@ -59,7 +60,37 @@ function createWindow() {
   });
 }
 
-function createMenu() {
+function buildMenuTemplate() {
+  const deviceItems = [];
+  deviceItems.push({
+    label: 'Refresh Cameras',
+    accelerator: 'F5',
+    click: () => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('menu-refresh');
+      }
+    },
+  });
+  deviceItems.push({ type: 'separator' });
+
+  if (Array.isArray(currentCameras) && currentCameras.length > 0) {
+    for (const cam of currentCameras) {
+      const vendorHex = typeof cam.vendor === 'number' ? `0x${cam.vendor.toString(16).padStart(4, '0')}` : cam.vendorHex || '0x0000';
+      const productHex = typeof cam.product === 'number' ? `0x${cam.product.toString(16).padStart(4, '0')}` : cam.productHex || '0x0000';
+      const suffix = cam.deviceId ? ` • ${String(cam.deviceId).slice(0,8)}` : '';
+      deviceItems.push({
+        label: `${cam.name || 'Unknown Camera'}  (${vendorHex}:${productHex})${suffix}`,
+        click: () => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('menu-select-camera', cam);
+          }
+        }
+      });
+    }
+  } else {
+    deviceItems.push({ label: 'No cameras found', enabled: false });
+  }
+
   const template = [
     {
       label: 'File',
@@ -71,17 +102,7 @@ function createMenu() {
     },
     {
       label: 'Devices',
-      submenu: [
-        {
-          label: 'Refresh Cameras',
-          accelerator: 'F5',
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('menu-refresh');
-            }
-          },
-        },
-      ],
+      submenu: deviceItems,
     },
     {
       label: 'Options',
@@ -110,19 +131,16 @@ function createMenu() {
     {
       label: 'Help',
       submenu: [
-        {
-          label: 'About',
-          click: () => {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('menu-show-info');
-            }
-          },
-        },
+        { label: 'About (Removed)', enabled: false },
       ],
     },
   ];
 
-  const menu = Menu.buildFromTemplate(template);
+  return template;
+}
+
+function createMenu() {
+  const menu = Menu.buildFromTemplate(buildMenuTemplate());
   Menu.setApplicationMenu(menu);
 }
 
@@ -130,6 +148,8 @@ function createMenu() {
 app.whenReady().then(() => {
   createWindow();
   createMenu();
+  // Initial camera fetch to populate Devices menu
+  ipcMain.invoke('list-cameras').catch(() => {});
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -152,6 +172,8 @@ ipcMain.handle('list-cameras', async () => {
     const moduleUrl = pathToFileURL(wrapperModulePath).href;
     const { listConnectedCameras } = await import(moduleUrl);
     const cameras = await listConnectedCameras();
+    currentCameras = Array.isArray(cameras) ? cameras : [];
+    createMenu();
     return {
       success: true,
       cameras,
@@ -183,12 +205,16 @@ ipcMain.handle('list-cameras', async () => {
           try {
             const maybe = output.trim();
             const cameras = maybe ? JSON.parse(maybe) : [];
+            currentCameras = Array.isArray(cameras) ? cameras : [];
+            createMenu();
             resolve({ success: true, cameras, count: cameras.length });
             return;
           } catch {}
 
           // If formatted text indicates none found
           if (output.includes('No UVC-compatible cameras found')) {
+            currentCameras = [];
+            createMenu();
             resolve({ success: true, cameras: [], count: 0 });
             return;
           }
@@ -201,8 +227,18 @@ ipcMain.handle('list-cameras', async () => {
         });
       });
     } catch (spawnError) {
+      currentCameras = [];
+      createMenu();
       return { success: false, error: spawnError.message || esmError.message };
     }
+  }
+});
+
+// Receive merged camera list from renderer (includes OS-visible cameras)
+ipcMain.on('update-cameras', (_event, cameras) => {
+  if (Array.isArray(cameras)) {
+    currentCameras = cameras;
+    createMenu();
   }
 });
 
