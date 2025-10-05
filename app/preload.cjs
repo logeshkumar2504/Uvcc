@@ -19,6 +19,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onCameraUpdate: (callback) => {
     ipcRenderer.on('camera-update', callback);
   },
+  onMenuRefresh: (callback) => {
+    ipcRenderer.on('menu-refresh', callback);
+  },
+  onMenuShowInfo: (callback) => {
+    ipcRenderer.on('menu-show-info', callback);
+  },
   
   // Remove listeners
   removeAllListeners: (channel) => {

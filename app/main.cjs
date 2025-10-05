@@ -3,7 +3,7 @@ Camera Lister Desktop Application - Main Process (CommonJS version)
 A modern desktop application to list connected UVC cameras
 */
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const { pathToFileURL } = require('url');
@@ -59,9 +59,77 @@ function createWindow() {
   });
 }
 
+function createMenu() {
+  const template = [
+    {
+      label: 'File',
+      submenu: [
+        { role: 'reload', label: 'Reload Window' },
+        { type: 'separator' },
+        { role: process.platform === 'darwin' ? 'close' : 'quit', label: process.platform === 'darwin' ? 'Close' : 'Quit' },
+      ],
+    },
+    {
+      label: 'Devices',
+      submenu: [
+        {
+          label: 'Refresh Cameras',
+          accelerator: 'F5',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('menu-refresh');
+            }
+          },
+        },
+      ],
+    },
+    {
+      label: 'Options',
+      submenu: [
+        { label: 'Settings (Coming soon)', enabled: false },
+      ],
+    },
+    {
+      label: 'Capture',
+      submenu: [
+        { label: 'Start Capture (Coming soon)', enabled: false },
+      ],
+    },
+    {
+      label: 'UVC Extension',
+      submenu: [
+        { label: 'Manage Extensions (Coming soon)', enabled: false },
+      ],
+    },
+    {
+      label: 'Recording',
+      submenu: [
+        { label: 'Start Recording (Coming soon)', enabled: false },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        {
+          label: 'About',
+          click: () => {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('menu-show-info');
+            }
+          },
+        },
+      ],
+    },
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
 // App event listeners
 app.whenReady().then(() => {
   createWindow();
+  createMenu();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

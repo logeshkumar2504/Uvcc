@@ -62,6 +62,14 @@ class CameraListerApp {
         this.loadCameras();
       }
     });
+
+    // Native menu hooks
+    if (window.electronAPI && window.electronAPI.onMenuRefresh) {
+      window.electronAPI.onMenuRefresh(() => this.loadCameras());
+    }
+    if (window.electronAPI && window.electronAPI.onMenuShowInfo) {
+      window.electronAPI.onMenuShowInfo(() => this.showInfoModal());
+    }
   }
 
   async loadCameras() {
