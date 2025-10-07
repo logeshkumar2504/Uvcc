@@ -2,3 +2,15 @@ dist/
 node_modules/
 .uvccrc
 .uvccrc.json
+
+# Build artifacts and releases
+release/
+*.exe
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.snap
+win-unpacked/
+mac-unpacked/
+linux-unpacked/
